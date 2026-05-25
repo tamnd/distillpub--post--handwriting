@@ -1,0 +1,264 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=768">
+<title>Bốn Thí Nghiệm với Mạng Nơ-ron Viết Tay</title>
+<link rel="stylesheet" href="assets/distill-handwriting.css">
+<script type="text/front-matter">
+  title: Bốn Thí Nghiệm với Mạng Nơ-ron Viết Tay
+  description: Một số trực quan hóa tương tác của mô hình sinh chữ viết tay. Có phần vui, có phần nghiêm túc.
+  authors:
+    - Shan Carter: http://shancarter.com
+    - David Ha: https://github.com/hardmaru
+    - Ian Johnson: https://github.com/enjalot
+    - Chris Olah: http://colah.github.io/
+  affiliations:
+    - Google Brain: http://g.co/brain
+    - Google Brain: http://g.co/brain
+    - Google Cloud: http://cloud.google.com
+    - Google Brain: http://g.co/brain
+</script>
+
+<script src="assets/webcomponents-lite.min.js"></script>
+<link rel="import" href="assets/polymer-mini.html">
+<script src="assets/d3.min.js"></script>
+<script src="assets/d3-scale-chromatic.min.js"></script>
+
+<script>
+  function cellClick(cell) {
+    document.querySelector('figure-cells[mode=sorted]').setCell(cell);
+  }
+</script>
+
+<link rel="import" href="assets/distill-stage-manager.html">
+<link rel="import" href="assets/figure-animated.html">
+<link rel="import" href="assets/figure-predict.html">
+<link rel="import" href="assets/figure-hairs.html">
+<link rel="import" href="assets/figure-cells.html">
+<link rel="import" href="assets/figure-cells-draw.html">
+
+<style>
+.post h2 {
+  border-bottom: none!important;
+}
+  .post .controls {
+    border-top: 1px solid rgba(0, 0, 0, 0.1);
+    margin-top: 48px;
+    padding-top: 18px;
+  }
+  .post .controls span {
+    font-size: 14px;
+  }
+  .post .controls button {
+    font-size: 13px;
+    padding: 4px 8px;
+    border-radius: 3px;
+    background-color: rgba(0, 0, 0, 0.03);
+    border: 1px solid rgba(0, 0, 0, 0.2);
+  }
+  .post .controls select {
+    margin-right: 8px;
+    font-size: 13px;
+    font-family: "Open sans";
+    border-radius: 3px;
+    background-color: rgba(0, 0, 0, 0.03);
+    border: 1px solid rgba(0, 0, 0, 0.2);
+  }
+  .post .controls input[type="range"] {
+    position: relative;
+    top: 3px;
+  }
+  .post sup {
+    vertical-align: baseline;
+    position: relative;
+    top: -8px;
+    margin: 0 3px 0 2px;
+    font-size: 12px;
+  }
+  .post a {
+    cursor: pointer;
+  }
+</style>
+
+<dt-article class="centered post">
+  <h1 class="l-middle">Bốn Thí Nghiệm với Mạng Nơ-ron Viết Tay</h1>
+  <h2 class="l-middle">Hãy bắt đầu bằng việc sinh nét chữ mới dựa trên nét viết tay bạn nhập vào.</h2>
+
+  <div class="l-screen" style="position: relative;">
+    <div style="position: absolute; width: 100%;">
+      <div class="controls l-page" id="figure-predict-controls" style="z-index: 10;position: relative;margin-top: 18px;">
+        <button onclick="document.querySelector('figure-predict').playToggle()">Chạy/Tạm dừng</button>
+        <button onclick="document.querySelector('figure-predict').clear()">Xóa</button>
+
+        <span style="margin-left: 18px;">Độ dài dự đoán</span>
+        <input type="range" value="20" min="5" max="200" step="5" oninput="document.querySelector('figure-predict').setPredictionLength(this.value); document.querySelector('#figure-predict-controls .prediction-length').textContent = this.value;" style="width: 70px;"/>
+        <span class="prediction-length" style="display: inline-block; width: 18px; text-align: left; margin-left: 6px;">20</span>
+
+        <span style="margin-left: 18px;">Độ biến thiên<dt-fn>Mô hình có một tham số quyết định mức độ lấy mẫu rộng từ phân phối nền. Ở đây tham số đó được gọi là độ biến thiên, nhưng tên phổ biến hơn là temperature. Temperature thường được thảo luận trong <a href="https://en.wikipedia.org/wiki/Boltzmann_distribution">phân phối Boltzmann</a>, nhưng có thể tổng quát hóa cho mọi phân phối xác suất. Ở dạng tổng quát này, thay đổi temperature theo hệ số <i>T</i> tương ứng với việc nâng mọi xác suất lên lũy thừa <i>1/T</i> rồi chuẩn hóa.</dt-fn></span>
+        <input type="range" value="0.1" min="0.1" max="0.7" step="0.05" oninput="document.querySelector('figure-predict').setTemperature(this.value); document.querySelector('#figure-predict-controls .temperature').textContent = this.value;" style="width: 70px;"/>
+        <span class="temperature" style="display: inline-block; width: 40px;">0.1</span>
+      </div>
+    </div>
+    <figure-predict class="l-screen" temperature="0.1" predictionlength="20"></figure-predict>
+  </div>
+
+  <dt-byline></dt-byline>
+
+  <p>Mạng nơ-ron là một cách tiếp cận cực kỳ thành công trong học máy, nhưng rất khó hiểu vì sao chúng hành xử như vậy. Điều này đã tạo ra nhiều quan tâm và nỗ lực nhằm hiểu và trực quan hóa chúng; chúng tôi nghĩ rằng cho tới nay ta mới chỉ chạm vào bề mặt của những gì có thể làm được.</p>
+
+  <p>Trong bài viết này, chúng tôi thử đẩy hướng đó tiến thêm bằng cách lấy một mô hình sinh chữ viết tay<dt-fn>Mô hình dùng trong bài này là một phiên bản của mô hình được mô tả ở Mục 4.2 của bài <a href="https://arxiv.org/abs/1308.0850">Generating Sequences With Recurrent Neural Network</a> của Alex Graves <dt-cite key="graves2013generating"></dt-cite>. Đó là một LSTM nhỏ, có 500 hidden units, được huấn luyện cho nhiệm vụ sinh chữ viết tay vô điều kiện. Để xem mô tả chi tiết về mô hình và quy trình huấn luyện, hãy tham khảo <a href="http://blog.otoro.net/2015/12/12/handwriting-generation-demo-in-tensorflow/">bài blog này</a> <dt-cite key="ha2016handwriting"></dt-cite> cùng với bài của Graves. Sau khi huấn luyện LSTM, chúng tôi lượng tử hóa trọng số bằng số nguyên 8-bit và xuất trọng số sang một tệp nhỏ định dạng <a href="https://jb64.org/specification/">JSON-Base64</a>.</dt-fn> rồi trực quan hóa nó theo nhiều cách. Mô hình khá đơn giản để chạy tốt trong trình duyệt, nên đầu ra được sinh chủ yếu là các chữ và từ vô nghĩa, dù trông giống chữ viết tay thật. Tuy vậy, nó vẫn hữu ích cho mục đích khám phá các kỹ thuật trực quan hóa.</p>
+
+  <p>Cuối cùng, chúng tôi không có một câu trả lời hay một trực quan hóa tối hậu nào, nhưng có một số ý tưởng thú vị để chia sẻ. Chúng tôi hy vọng chúng giúp việc rút ra ý nghĩa từ bên trong các mô hình này trở nên dễ hơn.</p>
+
+  <h2>Nhìn vào đầu ra của mô hình</h2>
+
+  <p>Thí nghiệm đầu tiên là cách hiển nhiên nhất: khi muốn xem ai đó học một nhiệm vụ tốt đến đâu, ta thường yêu cầu họ trình diễn. Vì vậy, hãy yêu cầu mô hình viết gì đó cho ta và xem nó làm tốt đến mức nào.</p>
+
+  <div class="controls l-body" id="figure-animated-controls">
+    <button class="play" onclick="document.querySelector('figure-animated').togglePlay()">Chạy/Tạm dừng</button>
+    <span style="margin-left: 8px;">Độ biến thiên<sup><a href="#footnote1">1</a></sup></span>
+    <input type="range" value="0.6" min="0.1" max="1.5" step="0.05" oninput="document.querySelector('figure-animated').temperature(this.value); document.querySelector('#figure-animated-controls .value').textContent = this.value;" />
+    <span class="value">0.6</span>
+  </div>
+  <figure-animated class="l-page" temperature="0.6"></figure-animated>
+
+  <p>Phần lớn các nét là vô nghĩa, nhưng nhiều nét lại thuyết phục một cách đáng ngạc nhiên. Một số từ thật hoặc gần như thật thậm chí bắt đầu xuất hiện. Một điều đáng chú ý là phong cách chữ viết tổng thể ít nhiều nhất quán trong mỗi mẫu. Lý do là kiểu kiến trúc dùng cho mô hình này, LSTM, có cơ chế ghi nhớ các nét trước đó. Vì vậy nó có thể nhớ những điều như chữ viết vòng vèo hay gãy khúc ra sao, hoặc chữ cái nào đứng trước chữ hiện tại. Chris Olah có một <a href="http://colah.github.io/posts/2015-08-Understanding-LSTMs/">bài nhập môn hay</a> về LSTM và cách chúng ghi nhớ <dt-cite key="olah2015understanding"></dt-cite>.</p>
+
+  <p>Ngay cả với bộ nhớ này, kỹ thuật sinh mẫu từ mạng nơ-ron vẫn mang tính xác suất, nghĩa là mỗi mẫu chỉ là một trong không gian khả năng lớn hơn rất nhiều. Xem từng mẫu một tạo cảm giác chưa thỏa đáng: làm sao ta suy luận được nhiều từ một hoặc hai mẫu khi có gần như vô hạn khả năng? Nếu thứ gì đó trông sai, làm sao biết đó là vì mô hình có vấn đề căn bản hay chỉ là xui rủi?</p>
+
+  <figure class="l-gutter">
+    <img class="key" src="assets/color-key.svg" style="width: 145px;">
+  </figure>
+
+  <p>Ở mỗi vòng lặp, mô hình có thể tạo ra nhiều đường đi. Thay vì chọn một đường rồi bỏ phần còn lại, hãy vẽ, chẳng hạn, 50 đường. Các nét màu xanh bên dưới là những nơi mô hình có thể rẽ sang phải so với nét đã chọn, còn màu cam là nơi nó có thể rẽ sang trái.</p>
+
+  <figure-hairs class="l-screen" style="clear: both;">
+    <div class="controls l-body">
+      <select class="sample">
+        <option value="001">Mẫu sinh 1</option>
+        <option value="002">Mẫu sinh 2</option>
+        <option value="003" selected>Mẫu sinh 3</option>
+        <option value="004">Mẫu sinh 4</option>
+        <option value="005">Mẫu sinh 5</option>
+        <option value="straight">Đường thẳng</option>
+      </select>
+
+      <span style="margin-left: 18px;">Số bước</span>
+      <input type="range" min="0" max="2" step="1" class="step" value="2" style="width: 80px;"></input>
+      <span class="value">4</span>
+
+      <span style="margin-left: 18px;">Độ biến thiên<sup><a href="#footnote1">1</a></sup></span>
+      <input type="range" min="0" max="2" step="1" class="temperature" value="1" style="width: 80px;"></input>
+      <span class="temperature-val">0.5</span>
+    </div>
+  </figure-hairs>
+
+  <p>Với kỹ thuật này, ta đang chiếu sáng một vùng rộng hơn của không gian khả năng. Bạn có thể thấy một số vùng nơi mô hình có đồng thuận chung về việc nên làm tiếp theo. Những vùng khác có cảm giác "bất cứ điều gì cũng có thể xảy ra". Một số vùng dường như cho thấy một ngã rẽ: ta có thể đang vẽ chữ "a" hoặc "g". Vài bước sau, rõ ràng mô hình đã hội tụ về chữ "g" viết liền.</p>
+
+  <figure class="l-gutter">
+    <img class="key" src="assets/color-key.svg" style="width: 145px;">
+  </figure>
+
+  <p>Ngoài việc trực quan hóa các mẫu do mô hình sinh ra, kỹ thuật này cũng có thể áp dụng cho mẫu do con người tạo. Bên dưới, ta có thể thấy mô hình sẽ làm gì tại từng điểm nếu nó tiếp quản từ người viết.</p>
+
+  <figure-hairs class="l-screen" style="clear: both;">
+    <div class="controls l-body">
+      <select class="sample">
+        <option value="0">Mẫu kiểm định 0</option>
+        <option value="1">Mẫu kiểm định 1</option>
+        <option value="2" selected>Mẫu kiểm định 2</option>
+        <option value="3">Mẫu kiểm định 3</option>
+        <option value="4">Mẫu kiểm định 4</option>
+        <option value="v7">Mẫu kiểm định 5</option>
+        <option value="v5">Mẫu kiểm định 6</option>
+      </select>
+
+      <span style="margin-left: 18px;">Số bước</span>
+      <input type="range" min="0" max="2" step="1" class="step" value="2" style="width: 80px;"></input>
+      <span class="value">4</span>
+
+      <span style="margin-left: 18px;">Độ biến thiên<sup><a href="#footnote1">1</a></sup></span>
+      <input type="range" min="0" max="2" step="1" class="temperature" value="1" style="width: 80px;"></input>
+      <span class="temperature-val">0.5</span>
+    </div>
+  </figure-hairs>
+
+  <p>Từ các thí nghiệm này, rõ ràng mô hình đã học được khá nhiều về chữ viết tay của con người. Điều đó đặt ra câu hỏi: ta có thể trích xuất tri thức đó theo một cách có ý nghĩa nào không, thay vì chỉ dùng mù quáng để bắt chước chữ viết?</p>
+
+  <h2>Khảo sát bên trong mô hình</h2>
+
+  <p>Mô hình của chúng ta có 500 cell, hoạt động như một dạng bộ nhớ mà nó dùng như một phần đầu vào khi quyết định sinh gì tiếp theo. Nếu có thể thấy các cell đó hoạt động ra sao khi mô hình tiến triển, ta có thể có trực giác về việc mô hình đang làm gì.</p>
+
+  <p>Ta bắt đầu bằng cách hiển thị activation của các cell theo thời gian. Mỗi cột trong heatmap bên dưới biểu diễn một đoạn thẳng của chữ viết tay. Mỗi hàng biểu diễn một cell của mô hình và được tô màu theo activation của cell đó trên phần nét tương ứng. Khi quan sát sơ đồ, bạn có thể thấy một số mẫu trong cách một số cell kích hoạt cho các loại nét nhất định. Bạn có thể thay đổi cell dùng để tô màu nét bằng cách nhấp vào sơ đồ.</p>
+
+  <figure-cells class="l-page" mode="unsorted" defaults="93,0"></figure-cells>
+
+  <p>Bạn có thể đã chọn được một hoặc hai cell có mẫu thú vị, nhưng chúng tôi có lý do để tin rằng các cell hoạt động theo nhóm, nên hoạt động của một cell riêng lẻ có thể không thú vị bằng hoạt động của một nhóm cell.</p>
+
+  <p>Có cách nào sắp xếp các cell để cấu trúc này rõ hơn không? Chúng tôi thấy rằng áp dụng <a href="https://lvdmaaten.github.io/tsne/">t-SNE</a> một chiều <dt-cite key="maaten2008visualizing"></dt-cite> lên activation của các cell theo thời gian có thể tổ chức chúng, đưa các cell có hành vi tương tự lại gần nhau. Điều này làm sơ đồ dễ đọc hơn. Chúng tôi dùng vài mẹo nhỏ để đạt kết quả tốt nhất.<dt-fn>Chúng tôi dùng hai mẹo khác nhau để việc tổ chức neuron bằng t-SNE hoạt động tốt hơn. Thứ nhất, nếu trạng thái cell phần lớn là âm, chúng tôi chuẩn hóa bằng cách đổi dấu nó. Từ góc nhìn của LSTM, điều này hoàn toàn tương đương, miễn là ta đổi dấu một số trọng số. Dấu của trạng thái cell là tùy ý. Thứ hai, chúng tôi thử dùng các metric khác nhau trên các điểm trong tập dữ liệu cho t-SNE, khuyến khích nó đặt những điểm ta xem là tương tự ở gần nhau. Chúng tôi đạt kết quả tốt khi dựa metric trên dữ liệu làm mờ, để các cell lệch tiến hoặc lùi một bước vẫn gần nhau, và một metric Sobolev làm mờ để khuyến khích các thay đổi sắc nét thẳng hàng. Kết quả trình bày trong bài còn tốt hơn một chút nhờ tạo metric dựa trên percentile của activation cell trong một lân cận. Xem `bin/sort` trong repository để biết chi tiết.</dt-fn></p>
+
+  <figure-cells class="l-page" mode="sorted" defaults="55,0"></figure-cells>
+
+  <p>Trong phiên bản này, ta có thể tìm thấy vài hành vi rõ ràng. Ví dụ, các cell <a onclick="cellClick(11)">11</a>-<a onclick="cellClick(70)">70</a> ở phía trên dường như nhạy với các hướng và độ cong hơi khác nhau của đường bút, đặc biệt là cell <a onclick="cellClick(25)">25</a> và <a onclick="cellClick(55)">55</a>. Ngược lại, ở phía dưới, các cell dưới <a onclick="cellClick(427)">427</a> dường như tập trung vào nhấc bút; ví dụ, cell <a onclick="cellClick(494)">494</a> có vẻ dự đoán liệu bút sắp được nhấc lên hay không. Ở giữa, ta thấy nhiều loại cell, bao gồm một số cell theo dõi vị trí tuyệt đối. Cell <a onclick="cellClick(136)">136</a> và các lân cận có vẻ quan tâm tới vị trí ngang, trong khi các cell quanh <a onclick="cellClick(236)">236</a> quan tâm tới vị trí dọc. Cell <a onclick="cellClick(242)">242</a> dường như theo dõi vị trí bên trong một từ.</p>
+
+  <p>Một cách khác để khám phá activation là đưa cho mô hình một mẫu và xem activation tương tác. Bên dưới, bạn có thể viết và xem activation của tất cả cell theo thời gian thực.</p>
+
+  <div class="controls l-page" id="figure-cells-draw-controls" style="margin-top: 36px;">
+    <button onclick="document.querySelector('figure-cells-draw').clear()">Xóa</button>
+  </div>
+  <figure-cells-draw class="l-page" mode="sorted" defaults="55,0"></figure-cells-draw>
+
+  <hr>
+
+  <h2>Kết luận</h2>
+
+  <p>Danh tiếng "hộp đen" của các mô hình học máy là có cơ sở, nhưng chúng tôi tin một phần danh tiếng đó sinh ra từ bối cảnh lập trình mà chúng bị khóa trong đó. Trải nghiệm có một mô hình dễ kiểm tra trong cùng bối cảnh lập trình với môi trường trực quan hóa tương tác, ở đây là JavaScript, tỏ ra rất hiệu quả cho việc tạo mẫu và khám phá ý tưởng mới cho bài viết này.</p>
+
+  <p>Khi ta có thể đưa các mô hình ngày càng nhiều vào cùng bối cảnh lập trình nơi công việc giao diện người dùng diễn ra, chúng tôi tin rằng các hình thức tương tác người-AI phong phú hơn sẽ nở rộ. Điều này chắc chắn có thể tác động rõ rệt tới việc gỡ lỗi và xây dựng mô hình, nhưng cũng ảnh hưởng tới cách mô hình được sử dụng. Nghiên cứu học máy thường tìm cách bắt chước và thay thế con người, và ngày càng làm được điều đó. Điều có vẻ ít được khám phá hơn là dùng học máy để tăng cường con người. Kiểu tương tác người-máy phức tạp này được khám phá tốt nhất khi toàn bộ năng lực của mô hình có sẵn trong bối cảnh giao diện người dùng.</p>
+</dt-article>
+
+<dt-appendix class="centered">
+  <h3>Lời cảm ơn</h3>
+
+  <p>Chúng tôi biết ơn các nhận xét của Fernanda Viegas, Martin Wattenberg và Daniel Smilkov.</p>
+
+  <p>Công việc này được thực hiện nhờ sự hỗ trợ của nhóm <a href="https://research.google.com/teams/brain/">Google Brain</a>.</p>
+
+  <h3>Đóng góp của tác giả</h3>
+
+  <p>Shan Carter viết bài và tạo các thí nghiệm tương tác trong phần đầu. David Ha tạo mô hình chữ viết tay và chuyển nó sang JavaScript. Ian Johnson tạo các sơ đồ cuối cùng để khám phá activation. Chris Olah cung cấp định hướng và ý tưởng cốt lõi cho các sơ đồ, đồng thời biên tập bài viết.</p>
+</dt-appendix>
+
+<script type="text/bibliography">
+@article{graves2013generating,
+  title={Generating sequences with recurrent neural networks},
+  author={Graves, Alex},
+  journal={arXiv preprint arXiv:1308.0850},
+  year={2013},
+  url={https://arxiv.org/pdf/1308.0850v5.pdf}
+}
+
+@misc{ha2016handwriting,
+ title={Handwriting Generation Demo in TensorFlow},
+ author={Ha, David},
+ year={2016},
+ url={http://blog.otoro.net/2015/12/12/handwriting-generation-demo-in-tensorflow/}
+}
+
+@article{maaten2008visualizing,
+  title={Visualizing data using t-SNE},
+  author={Maaten, Laurens van der and Hinton, Geoffrey},
+  journal={Journal of Machine Learning Research},
+  volume={9},
+  number={Nov},
+  pages={2579--2605},
+  year={2008},
+  url={http://www.jmlr.org/papers/volume9/vandermaaten08a/vandermaaten08a.pdf}
+}
+
+@misc{olah2015understanding,
+ title={Understanding LSTM Networks},
+ author={Olah, Christopher},
+ year={2015},
+ url={http://colah.github.io/posts/2015-08-Understanding-LSTMs/}
+}
+</script>
